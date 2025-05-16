@@ -1,0 +1,12 @@
+Flask
+mysql-connector-python
+Werkzeug
+marshmallow
+PyJWT>=2.0.0
+python-dotenv>=0.20
+Flask-SQLAlchemy>=3.0.0
+Flask-JWT-Extended>=4.5.2
+pymysql
+scikit-learn
+noisereduce
+pip install torch torchvision librosa opencv-python noisereduce scikit-learn joblib
