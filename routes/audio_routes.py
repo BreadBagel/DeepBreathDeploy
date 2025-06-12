@@ -1,50 +1,63 @@
+#audio_routes.py
 from flask import Blueprint, request, jsonify, current_app
+import mysql.connector
+from config import Config
+from routes.utils.auth import token_required
 from werkzeug.utils import secure_filename
 import os
+import tempfile
+tempfile
 
 from utils.file_utils import allowed_file, convert_to_wav
-from utils.audio_processing import (
-    extract_mfcc,
-    extract_cochleagram,
-    save_spectrogram,
-    save_cochleagram
-)
 
-audio_blueprint = Blueprint('audio', __name__)
+audio_bp = Blueprint('audio', __name__, url_prefix='/api')
 
-@audio_blueprint.route('/upload-audio', methods=['POST'])
+@audio_bp.route('/upload-audio', methods=['POST'])
+@token_required
 def upload_audio():
-    if 'file' not in request.files:
-        return jsonify({'error': 'No file part'}), 400
+    # 1) Validate inputs
+    if 'file' not in request.files or 'session_id' not in request.form:
+        return jsonify({'error':'Missing file or session_id'}), 400
 
+    session_id = request.form['session_id']
     file = request.files['file']
-    if file.filename == '':
-        return jsonify({'error': 'No selected file'}), 400
+    if file.filename == '' or not allowed_file(file.filename):
+        return jsonify({'error':'Invalid or empty file'}), 400
 
-    if file and allowed_file(file.filename):
-        filename = secure_filename(file.filename)
-        upload_path = os.path.join(current_app.config['UPLOAD_FOLDER'], filename)
-        file.save(upload_path)
+    # 2) Secure and optionally convert
+    filename  = secure_filename(file.filename)
+    raw_bytes = file.read()
+    # If .3gp conversion required, use a safe temp directory
+    if filename.lower().endswith('.3gp'):
+        temp_dir  = tempfile.gettempdir()
+        temp_path = os.path.join(temp_dir, filename)
+        with open(temp_path, 'wb') as f:
+            f.write(raw_bytes)
+        wav_path = convert_to_wav(temp_path)
+        with open(wav_path, 'rb') as f:
+            raw_bytes = f.read()
+        filename = os.path.basename(wav_path)
+        # clean up temp files
+        try:
+            os.remove(temp_path)
+        except OSError:
+            pass
 
-        if filename.endswith('.3gp'):
-            upload_path = convert_to_wav(upload_path)
-            filename = filename.rsplit('.', 1)[0] + '.wav'
+    # 3) Insert into audio_recordings table
+    conn = mysql.connector.connect(**Config.get_db_config())
+    cur  = conn.cursor()
+    sql  = (
+      "INSERT INTO audio_recordings"
+      " (session_id, filename, audio_blob) VALUES (%s, %s, %s)"
+    )
+    cur.execute(sql, (session_id, filename, raw_bytes))
+    conn.commit()
+    rec_id = cur.lastrowid
+    cur.close()
+    conn.close()
 
-        # Spectrogram paths
-        spec_path = os.path.join(current_app.config['SPECTROGRAM_FOLDER'], f"{filename}.png")
-        cochleagram_img_path = os.path.join(current_app.config['SPECTROGRAM_FOLDER'], f"{filename}_cochleagram.png")
-
-        save_spectrogram(upload_path, spec_path)
-        mfcc_data = extract_mfcc(upload_path)
-        cochleagram_data = extract_cochleagram(upload_path)
-        save_cochleagram(upload_path, cochleagram_img_path)
-
-        return jsonify({
-            'message': 'File uploaded successfully',
-            'spectrogram_path': spec_path,
-            'mfcc_data': mfcc_data,
-            'cochleagram_data': cochleagram_data,
-            'cochleagram_image_path': cochleagram_img_path
-        })
-
-    return jsonify({'error': 'Invalid file format'}), 400
+    return jsonify({
+      'status': 'success',
+      'recording_id': rec_id,
+      'filename': filename
+    }), 201

@@ -1,0 +1,17 @@
+# IDE & cache
+.idea/
+__pycache__/
+*.pyc
+
+# Uploaded data
+uploads/
+spectrograms/
+
+# Large artifacts you don’t want baked in
+burst_stats.csv
+*.csv
+
+# Git, env, logs
+.git/
+.env
+*.log

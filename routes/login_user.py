@@ -54,7 +54,7 @@ def login_user():
 
     except Error as e:
         print("Login DB error:", e)
-        return jsonify({'status':'error', 'message':'Database error.'}), 500
+        return jsonify({'status':'error', 'message':'Database error.'}),
 
     finally:
         # 6) Clean up DB connections

@@ -1,3 +1,5 @@
+#symtpms_routes.py
+
 from flask import Blueprint, request, jsonify
 import mysql.connector
 from config import Config
@@ -6,10 +8,29 @@ from routes.utils.auth import verify_token
 symptoms_bp = Blueprint('symptoms', __name__, url_prefix='/api')
 
 SYMPTOM_KEYS = [
-    'fever','tachypnea','chest_retractions','nasal_flaring',
-    'poor_feeding','lethargy','grunting','cyanosis','refusal_feeds',
-    'stridor','fast_breathing',
-    'dry_cough','wheezing','nocturnal_cough','productive_cough','chest_tightness'
+
+    'fever',
+    # 'tachypnea',
+    'chest_retractions',
+    'nasal_flaring',
+    # 'poor_feeding',
+    'lethargy',
+    'grunting',
+    'cyanosis',
+    # 'refusal_feeds',
+    #'stridor'  # remove,
+    #'fast_breathing'  # remove fast breathing,
+    'dry_cough',
+    'wheezing',
+    'nocturnal_cough',
+    'productive_cough',
+    'rr'
+    # 'chest_tightness'
+    # apnea add
+    # 'fever','tachypnea','chest_retractions','nasal_flaring',
+    # 'poor_feeding','lethargy','grunting','cyanosis','refusal_feeds',
+    # 'stridor','fast_breathing',
+    # 'dry_cough','wheezing','nocturnal_cough','productive_cough','chest_tightness'
 ]
 
 
@@ -48,6 +69,7 @@ def submit_symptoms():
     columns = ', '.join(['session_id'] + SYMPTOM_KEYS)
     placeholders = ', '.join(['%s'] * (1 + len(SYMPTOM_KEYS)))
     sql = f"INSERT INTO symptoms ({columns}) VALUES ({placeholders})"
+
 
     # Build parameter tuple: session_id followed by int flags
     params = [session_id] + [int(bool(data[key])) for key in SYMPTOM_KEYS]

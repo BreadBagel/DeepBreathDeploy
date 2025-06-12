@@ -1,4 +1,6 @@
-from flask import Blueprint, jsonify, g, request
+#session_routes.py
+
+from flask import Blueprint, jsonify, g, request, current_app
 import mysql.connector
 from config import Config
 from routes.utils.auth import token_required
@@ -11,17 +13,10 @@ def get_db():
 @session_bp.route('/patients/<int:pid>/sessions', methods=['GET'])
 @token_required
 def list_sessions(pid):
-    # Security check: only allow the owner (g.user_id) to view their patient’s sessions
     conn = get_db()
     cur = conn.cursor(dictionary=True)
     cur.execute('SELECT user_id FROM patients WHERE id=%s', (pid,))
     owner = cur.fetchone()
-    #if not owner or owner['user_id'] != g.user_id:
-    #    cur.close()
-    #    conn.close()
-    #    return jsonify({'status': 'error', 'message': 'Forbidden'}), 403
-
-    # Fetch each session along with the latest symptoms.recorded_at (fallback to date_recorded)
     query = """
     SELECT
       sess.id                         AS session_id,
@@ -38,7 +33,6 @@ def list_sessions(pid):
     """
     cur.execute(query, (pid,))
     rows = cur.fetchall()
-
     cur.close()
     conn.close()
     return jsonify(rows), 200
@@ -46,21 +40,72 @@ def list_sessions(pid):
 @session_bp.route('/patients/<int:pid>/sessions', methods=['POST'])
 @token_required
 def create_session(pid):
-    # Security: ensure the patient belongs to the logged-in user
+    # Log who owns the patient and who the JWT user is
+    current_app.logger.debug(f"create_session called: g.user_id={g.user_id}")
     conn = get_db()
     cur = conn.cursor(dictionary=True)
     cur.execute('SELECT user_id FROM patients WHERE id=%s', (pid,))
     owner = cur.fetchone()
+    current_app.logger.debug(f"owner from DB: {owner}")
+
     if not owner or owner['user_id'] != g.user_id:
         cur.close()
         conn.close()
         return jsonify({'status':'error','message':'Forbidden'}), 403
 
-    # Insert a new session
     cur.execute('INSERT INTO sessions (patient_id) VALUES (%s)', (pid,))
     conn.commit()
     session_id = cur.lastrowid
-
     cur.close()
     conn.close()
     return jsonify({'status':'success','session_id': session_id}), 201
+
+@session_bp.route('/sessions/<int:session_id>/diagnosis', methods=['POST'])
+@token_required
+def save_diagnosis(session_id):
+    conn = get_db()
+    cur  = conn.cursor(dictionary=True)
+    cur.execute('''
+      SELECT s.patient_id, p.user_id 
+      FROM sessions s 
+      JOIN patients p ON p.id = s.patient_id 
+      WHERE s.id = %s
+    ''', (session_id,))
+    row = cur.fetchone()
+    if not row or row['user_id'] != g.user_id:
+        cur.close()
+        conn.close()
+        return jsonify({'status': 'error', 'message': 'Session not found or forbidden'}), 404
+
+    data = request.get_json(silent=True)
+    if not data:
+        cur.close(); conn.close()
+        return jsonify({'status':'error','message':'Invalid or missing JSON'}), 400
+
+    diag = data.get('diagnosis')
+    mc   = data.get('model_confidence')
+    aop  = data.get('audio_only_probability')
+    if diag is None or mc is None or aop is None:
+        cur.close(); conn.close()
+        return jsonify({
+            'status':'error',
+            'message':'Must include diagnosis, model_confidence, audio_only_probability'
+        }), 400
+
+    try:
+        cur.execute('''
+          UPDATE sessions
+          SET diagnosis = %s,
+              model_confidence = %s,
+              audio_only_probability = %s
+          WHERE id = %s
+        ''', (diag, mc, aop, session_id))
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        cur.close(); conn.close()
+        current_app.logger.error(f"DB error: {e}")
+        return jsonify({'status':'error','message':'Database error'}), 500
+
+    cur.close(); conn.close()
+    return jsonify({'status':'ok', 'message':'Diagnosis saved'}), 200
